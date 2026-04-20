@@ -14,7 +14,6 @@ load_dotenv()
 
 st.set_page_config(
     page_title="Gmail Email Bot",
-    page_icon="✉️",
     layout="wide",
 )
 
@@ -65,10 +64,10 @@ def read_uploaded_recipients(uploaded_file) -> pd.DataFrame:
     file_bytes = uploaded_file.getvalue()
 
     if file_name.endswith(".csv"):
-      try:
-          return pd.read_csv(io.BytesIO(file_bytes))
-      except UnicodeDecodeError:
-          return pd.read_csv(io.BytesIO(file_bytes), encoding="latin-1")
+        try:
+            return pd.read_csv(io.BytesIO(file_bytes))
+        except UnicodeDecodeError:
+            return pd.read_csv(io.BytesIO(file_bytes), encoding="latin-1")
 
     if file_name.endswith(".xlsx"):
         return pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
@@ -77,7 +76,10 @@ def read_uploaded_recipients(uploaded_file) -> pd.DataFrame:
         return pd.read_excel(io.BytesIO(file_bytes), engine="xlrd")
 
     if file_name.endswith(".txt"):
-        return parse_text_recipients(file_bytes.decode("utf-8"))
+        try:
+            return parse_text_recipients(file_bytes.decode("utf-8"))
+        except UnicodeDecodeError:
+            return parse_text_recipients(file_bytes.decode("latin-1"))
 
     raise ValueError("Unsupported list file. Use CSV, XLSX, XLS, or TXT.")
 
@@ -134,7 +136,10 @@ def read_content_file(uploaded_file):
         return None, None
 
     file_name = uploaded_file.name.lower()
-    raw_text = uploaded_file.getvalue().decode("utf-8")
+    try:
+        raw_text = uploaded_file.getvalue().decode("utf-8")
+    except UnicodeDecodeError:
+        raw_text = uploaded_file.getvalue().decode("latin-1")
 
     if file_name.endswith((".html", ".htm")):
         return "html", raw_text
@@ -224,10 +229,14 @@ with col_left:
     )
 
     recipient_sources = []
-    if raw_recipients.strip():
-        recipient_sources.append(parse_text_recipients(raw_recipients))
-    if recipient_file is not None:
-        recipient_sources.append(read_uploaded_recipients(recipient_file))
+    recipient_error = ""
+    try:
+        if raw_recipients.strip():
+            recipient_sources.append(parse_text_recipients(raw_recipients))
+        if recipient_file is not None:
+            recipient_sources.append(read_uploaded_recipients(recipient_file))
+    except Exception as exc:  # noqa: BLE001
+        recipient_error = str(exc)
 
     if recipient_sources:
         combined_recipients = pd.concat(recipient_sources, ignore_index=True, sort=False)
@@ -236,7 +245,9 @@ with col_left:
         recipients_df = pd.DataFrame(columns=["email", "name"])
 
     st.metric("Valid recipients", len(recipients_df))
-    if recipients_df.empty:
+    if recipient_error:
+        st.error(recipient_error)
+    elif recipients_df.empty:
         st.info("Add a list manually or upload a file to preview recipients.")
     else:
         st.dataframe(recipients_df, use_container_width=True, height=260)
@@ -262,8 +273,12 @@ with col_right:
 
     uploaded_body_type = None
     uploaded_body = None
-    if content_file is not None:
-        uploaded_body_type, uploaded_body = read_content_file(content_file)
+    content_error = ""
+    try:
+        if content_file is not None:
+            uploaded_body_type, uploaded_body = read_content_file(content_file)
+    except Exception as exc:  # noqa: BLE001
+        content_error = str(exc)
 
     if html_body.strip():
         body_type = "html"
@@ -278,7 +293,9 @@ with col_right:
         body_type = "text"
         body_template = ""
 
-    if not recipients_df.empty and body_template:
+    if content_error:
+        st.error(content_error)
+    elif not recipients_df.empty and body_template:
         sample_record = recipients_df.iloc[0].to_dict()
         st.markdown("**Preview**")
         st.write(render_template(subject, sample_record) or "(subject is empty)")
@@ -292,30 +309,42 @@ with col_right:
 st.divider()
 st.markdown("Use placeholders like `{{name}}`, `{{email}}`, or any spreadsheet column such as `{{company}}`.")
 
-send_disabled = recipients_df.empty or not subject.strip() or not body_template.strip() or not gmail_user or not gmail_password
+send_disabled = (
+    bool(recipient_error)
+    or bool(content_error)
+    or recipients_df.empty
+    or not subject.strip()
+    or not body_template.strip()
+    or not gmail_user
+    or not gmail_password
+)
 
 if st.button("Send emails", type="primary", disabled=send_disabled, use_container_width=True):
-    with st.spinner("Sending emails through Gmail..."):
-        results_df = send_gmail_batch(
-            gmail_user=gmail_user,
-            gmail_password=gmail_password,
-            from_name=from_name.strip(),
-            recipients_df=recipients_df,
-            subject_template=subject,
-            body_type=body_type,
-            body_template=body_template,
+    try:
+        with st.spinner("Sending emails through Gmail..."):
+            results_df = send_gmail_batch(
+                gmail_user=gmail_user,
+                gmail_password=gmail_password,
+                from_name=from_name.strip(),
+                recipients_df=recipients_df,
+                subject_template=subject,
+                body_type=body_type,
+                body_template=body_template,
+            )
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not send emails: {exc}")
+    else:
+        sent_count = int((results_df["status"] == "sent").sum())
+        failed_count = int((results_df["status"] == "failed").sum())
+
+        st.subheader("Send Results")
+        metric_col_1, metric_col_2 = st.columns(2)
+        metric_col_1.metric("Sent", sent_count)
+        metric_col_2.metric("Failed", failed_count)
+        st.dataframe(results_df, use_container_width=True, height=320)
+        st.download_button(
+            "Download results CSV",
+            results_df.to_csv(index=False).encode("utf-8"),
+            file_name="send-results.csv",
+            mime="text/csv",
         )
-
-    sent_count = int((results_df["status"] == "sent").sum())
-    failed_count = int((results_df["status"] == "failed").sum())
-
-    st.subheader("Send Results")
-    st.metric("Sent", sent_count)
-    st.metric("Failed", failed_count)
-    st.dataframe(results_df, use_container_width=True, height=320)
-    st.download_button(
-        "Download results CSV",
-        results_df.to_csv(index=False).encode("utf-8"),
-        file_name="send-results.csv",
-        mime="text/csv",
-    )

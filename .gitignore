@@ -4,3 +4,4 @@ uploads
 npm-debug.log*
 .streamlit
 __pycache__
+.venv
