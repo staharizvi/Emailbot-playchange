@@ -236,8 +236,11 @@ def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subje
     return pd.DataFrame(results)
 
 
+APP_VERSION = "v0.2.0-attachments"
+
 st.title("Gmail Email Bot")
 st.caption("Send personalized Gmail emails from pasted lists, CSV files, or spreadsheets.")
+st.caption(f"Build: {APP_VERSION} — attachments enabled")
 
 with st.sidebar:
     st.subheader("Gmail Settings")
