@@ -1,9 +1,12 @@
 import io
+import mimetypes
 import os
 import re
 import smtplib
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email import encoders
 from string import Template
 
 import pandas as pd
@@ -171,8 +174,26 @@ def build_preview_html(body_text: str) -> str:
     return f"<div style='font-family:Arial,sans-serif;line-height:1.6;'>{escaped}</div>"
 
 
-def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subject_template, body_type, body_template):
+def build_attachment_parts(attachment_files):
+    parts = []
+    for uploaded in attachment_files or []:
+        data = uploaded.getvalue()
+        filename = uploaded.name
+        mime_type, _ = mimetypes.guess_type(filename)
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+        maintype, subtype = mime_type.split("/", 1)
+        part = MIMEBase(maintype, subtype)
+        part.set_payload(data)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        parts.append(part)
+    return parts
+
+
+def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subject_template, body_type, body_template, attachment_files=None):
     results = []
+    attachment_parts = build_attachment_parts(attachment_files)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(gmail_user, gmail_password.replace(" ", ""))
@@ -182,16 +203,24 @@ def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subje
                 subject = render_template(subject_template, record)
                 rendered_body = render_template(body_template, record)
 
-                message = MIMEMultipart("alternative")
+                body_container = MIMEMultipart("alternative")
+                if body_type == "html":
+                    body_container.attach(MIMEText(rendered_body, "html"))
+                else:
+                    body_container.attach(MIMEText(rendered_body, "plain"))
+                    body_container.attach(MIMEText(build_preview_html(rendered_body), "html"))
+
+                if attachment_parts:
+                    message = MIMEMultipart("mixed")
+                    message.attach(body_container)
+                    for part in attachment_parts:
+                        message.attach(part)
+                else:
+                    message = body_container
+
                 message["From"] = f"{from_name} <{gmail_user}>" if from_name else gmail_user
                 message["To"] = record["email"]
                 message["Subject"] = subject
-
-                if body_type == "html":
-                    message.attach(MIMEText(rendered_body, "html"))
-                else:
-                    message.attach(MIMEText(rendered_body, "plain"))
-                    message.attach(MIMEText(build_preview_html(rendered_body), "html"))
 
                 server.sendmail(gmail_user, record["email"], message.as_string())
                 results.append({"email": record["email"], "status": "sent", "error": ""})
@@ -302,6 +331,11 @@ with col_right:
         height=180,
         placeholder="<p>Hi <strong>{{name}}</strong>,</p><p>Thanks for being on our list.</p>",
     )
+    attachment_files = st.file_uploader(
+        "Attachments (optional)",
+        accept_multiple_files=True,
+        help="Files here are attached to every email. Gmail total message size limit is 25 MB.",
+    )
 
     uploaded_body_type = None
     uploaded_body = None
@@ -362,6 +396,7 @@ if st.button("Send emails", type="primary", disabled=send_disabled, use_containe
                 subject_template=subject,
                 body_type=body_type,
                 body_template=body_template,
+                attachment_files=attachment_files,
             )
     except Exception as exc:  # noqa: BLE001
         st.error(f"Could not send emails: {exc}")
