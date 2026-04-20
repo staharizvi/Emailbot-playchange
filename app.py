@@ -174,26 +174,32 @@ def build_preview_html(body_text: str) -> str:
     return f"<div style='font-family:Arial,sans-serif;line-height:1.6;'>{escaped}</div>"
 
 
-def build_attachment_parts(attachment_files):
-    parts = []
+def load_attachment_blobs(attachment_files):
+    blobs = []
     for uploaded in attachment_files or []:
         data = uploaded.getvalue()
+        if not data:
+            continue
         filename = uploaded.name
         mime_type, _ = mimetypes.guess_type(filename)
         if mime_type is None:
             mime_type = "application/octet-stream"
         maintype, subtype = mime_type.split("/", 1)
-        part = MIMEBase(maintype, subtype)
-        part.set_payload(data)
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", "attachment", filename=filename)
-        parts.append(part)
-    return parts
+        blobs.append((filename, maintype, subtype, data))
+    return blobs
+
+
+def make_attachment_part(filename, maintype, subtype, data):
+    part = MIMEBase(maintype, subtype)
+    part.set_payload(data)
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", "attachment", filename=filename)
+    return part
 
 
 def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subject_template, body_type, body_template, attachment_files=None):
     results = []
-    attachment_parts = build_attachment_parts(attachment_files)
+    attachment_blobs = load_attachment_blobs(attachment_files)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(gmail_user, gmail_password.replace(" ", ""))
@@ -210,11 +216,11 @@ def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subje
                     body_container.attach(MIMEText(rendered_body, "plain"))
                     body_container.attach(MIMEText(build_preview_html(rendered_body), "html"))
 
-                if attachment_parts:
+                if attachment_blobs:
                     message = MIMEMultipart("mixed")
                     message.attach(body_container)
-                    for part in attachment_parts:
-                        message.attach(part)
+                    for filename, maintype, subtype, data in attachment_blobs:
+                        message.attach(make_attachment_part(filename, maintype, subtype, data))
                 else:
                     message = body_container
 
