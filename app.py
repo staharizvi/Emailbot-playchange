@@ -175,7 +175,7 @@ def send_gmail_batch(gmail_user, gmail_password, from_name, recipients_df, subje
     results = []
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(gmail_user, gmail_password)
+        server.login(gmail_user, gmail_password.replace(" ", ""))
 
         for record in recipients_df.to_dict(orient="records"):
             try:
@@ -209,13 +209,41 @@ with st.sidebar:
     default_user = os.getenv("GMAIL_USER", "")
     default_password = os.getenv("GMAIL_APP_PASSWORD", "")
     gmail_user = st.text_input("Gmail address", value=default_user, placeholder="yourgmail@gmail.com")
-    gmail_password = st.text_input("Gmail app password", value=default_password, type="password")
+    gmail_password = st.text_input(
+        "Gmail app password",
+        value=default_password,
+        type="password",
+        help="16-character app password (not your regular Gmail password).",
+    )
     from_name = st.text_input("From name", placeholder="Acme Team")
 
     if gmail_user and gmail_password:
         st.success("Gmail credentials loaded.")
     else:
-        st.warning("Add Gmail credentials here or in your .env file.")
+        st.warning("Add your Gmail address and a 16-character app password to send.")
+
+    with st.expander("How to create a Gmail app password"):
+        st.markdown(
+            """
+**1. Enable 2-Step Verification (required)**
+Open [myaccount.google.com/security](https://myaccount.google.com/security) → **2-Step Verification** → follow the prompts. App passwords are only available once 2SV is on.
+
+**2. Generate an app password**
+Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+- Under **App name**, enter anything (e.g. `Email Bot`).
+- Click **Create**. Google shows a **16-character password** (4 blocks of 4).
+
+**3. Use it here**
+- Paste it into **Gmail app password** above — with or without spaces, both work.
+- Use your full Gmail address (e.g. `you@gmail.com`) as the sender.
+
+**Notes**
+- If **App passwords** is missing, 2-Step Verification isn't enabled yet, or your account is managed by an organization that blocks it.
+- Workspace admins may need to allow *"Less secure"* app access / app passwords for the organization.
+- App passwords bypass 2SV for SMTP only — treat them like a password. Revoke unused ones from the same page.
+- This bot uses SMTP over SSL on `smtp.gmail.com:465`.
+            """
+        )
 
 col_left, col_right = st.columns([1.15, 0.85], gap="large")
 
