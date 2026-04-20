@@ -8,9 +8,6 @@ from string import Template
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-
-load_dotenv()
 
 st.set_page_config(
     page_title="Gmail Email Bot",
