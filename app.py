@@ -37,19 +37,25 @@ def parse_text_recipients(raw_text: str) -> pd.DataFrame:
         if not cleaned:
             continue
 
-        parts = [part.strip() for part in cleaned.split(",")]
         email = ""
         name = ""
 
-        if parts and "@" in parts[0]:
-            email = parts[0]
-            name = ",".join(parts[1:]).strip()
+        if "," in cleaned:
+            parts = [part.strip() for part in cleaned.split(",")]
+            email_index = next((i for i, part in enumerate(parts) if "@" in part), -1)
+            if email_index >= 0:
+                email = parts[email_index]
+                name = ", ".join(parts[:email_index] + parts[email_index + 1:]).strip()
+            else:
+                name = cleaned
         else:
             words = cleaned.split()
             email_candidates = [word for word in words if "@" in word]
             if email_candidates:
-                email = email_candidates[0].strip(",")
-                name = cleaned.replace(email, "").strip(" ,-")
+                email = email_candidates[0].strip(",;")
+                name = " ".join(word for word in words if word != email_candidates[0]).strip(" ,-")
+            else:
+                name = cleaned
 
         rows.append({"email": email, "name": name})
 
@@ -107,16 +113,17 @@ def normalize_recipients(df: pd.DataFrame) -> pd.DataFrame:
     if email_column is None:
         return pd.DataFrame(columns=["email", "name"])
 
-    possible_name_columns = ["name", "fullName", "firstName"]
-    name_column = next((column for column in possible_name_columns if column in renamed.columns), None)
-
-    if name_column is None and {"firstName", "lastName"}.issubset(set(renamed.columns)):
+    columns_set = set(renamed.columns)
+    if {"firstName", "lastName"}.issubset(columns_set):
         renamed["name"] = (
             renamed["firstName"].astype(str).str.strip()
             + " "
             + renamed["lastName"].astype(str).str.strip()
         ).str.strip()
         name_column = "name"
+    else:
+        possible_name_columns = ["name", "fullName", "firstName", "lastName"]
+        name_column = next((column for column in possible_name_columns if column in columns_set), None)
 
     if name_column is None:
         renamed["name"] = ""
