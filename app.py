@@ -241,6 +241,7 @@ APP_VERSION = "v0.2.0-attachments"
 st.title("Gmail Email Bot")
 st.caption("Send personalized Gmail emails from pasted lists, CSV files, or spreadsheets.")
 st.caption(f"Build: {APP_VERSION} — attachments enabled")
+st.caption("Created by Taha Rizvi")
 
 with st.sidebar:
     st.subheader("Gmail Settings")
